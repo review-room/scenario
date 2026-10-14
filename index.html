@@ -85,7 +85,7 @@
       <button id="csave">保存</button>
     </div>
   </div>
-  <div class="help">書き直すときは、自分のコメント（赤）を押して直し、もう一度保存すると上書きされます。空にして保存すると消えます。</div>
+  <div class="help">入れたコメントは、その行に来ると上の欄に出ます。書き直して保存すると上書きされ、空にして保存すると消えます。</div>
   <div class="status" id="status"></div>
   <div id="recbar" hidden></div>
   <div class="help pc">欄が空のとき：Enter・スペース＝再生／止める、←→＝前・次の行、↑↓＝前・次の行から続けて再生／入力中：↑↓＝コメントを付ける行を選び直す、Esc＝入力を消す／行を押すとそこから再生／自分のコメント（赤）を押すと書き直せます（空にして保存すると消えます）</div>
@@ -141,6 +141,7 @@ const status = t => { $("status").textContent = t; };
 let audio = null;
 let idx = 0, playing = false, timer = null, editing = false;
 let comments = {};
+let autoFilled = false;
 let myName = store.get("kn_name");
 const SPEEDS = [1, 1.25, 1.5, 1.75, 2];
 let RATE = SPEEDS.includes(Number(store.get("kn_rate"))) ? Number(store.get("kn_rate")) : 1;
@@ -187,11 +188,18 @@ function paintComments() {
     });
   });
 }
+function fillMine() {
+  const it = ITEMS[idx];
+  const mine = myName ? (comments[it.no] || []).find(x => x.name === myName) : null;
+  if (!playing && mine && (!cin.value.trim() || autoFilled)) { cin.value = mine.comment; editing = true; autoFilled = true; }
+  else if (autoFilled && (playing || !mine)) { cin.value = ""; editing = false; autoFilled = false; }
+  $("clabel").textContent = `${it.no}行目へのコメント` + (mine && !playing ? "（入れたコメントを直せます）" : "");
+}
 function show() {
   ITEMS.forEach((it, i) => it.el.classList.toggle("now", i === idx));
   const it = ITEMS[idx];
   $("now").innerHTML = `${it.no} <small>行目</small>`;
-  $("clabel").textContent = `${it.no}行目へのコメント`;
+  fillMine();
   const sc = $("scroller");
   sc.scrollTo({top: Math.max(0, it.el.offsetTop - (sc.clientHeight - it.el.offsetHeight) / 2), behavior: "smooth"});
 }
@@ -261,7 +269,7 @@ function advance() {
   if (idx < ITEMS.length - 1) { idx++; playCurrent(); } else { stop(); }
 }
 function start() { sessionPlayback(); playing = true; $("play").textContent = "❚❚ 止める"; keepAwake(true); playCurrent(); }
-function stop() { playing = false; clearTimeout(timer); audio.pause(); $("play").textContent = "▶ 再生"; keepAwake(false); }
+function stop() { playing = false; clearTimeout(timer); audio.pause(); $("play").textContent = "▶ 再生"; keepAwake(false); fillMine(); }
 function toggle() { playing ? stop() : start(); }
 function step(n) { idx = Math.max(0, Math.min(ITEMS.length - 1, idx + n)); if (playing) playCurrent(); else { show(); prefetchFrom(idx); } }
 
@@ -269,7 +277,7 @@ async function loadComments() {
   try {
     const r = await fetch(`${API}?video=${encodeURIComponent(VKEY)}`, {cache: "no-store"});
     if (!r.ok) return;
-    const j = await r.json(); comments = toRows(j.comments || []); paintComments();
+    const j = await r.json(); comments = toRows(j.comments || []); paintComments(); fillMine();
   } catch (e) {}
 }
 // i 番目の行に、自分の名前でコメントを保存する（空なら消す）。保存できたら true
@@ -294,7 +302,7 @@ async function save(thenPlay) {
     return false;
   }
   status(t ? `${it.no}行目のコメントを保存しました` : `${it.no}行目のコメントを消しました`);
-  cin.value = ""; editing = false;
+  cin.value = ""; editing = false; autoFilled = false;
   if (thenPlay) { if (idx < ITEMS.length - 1) idx++; start(); }
   keepFocus();
   return true;
@@ -312,6 +320,7 @@ cin.addEventListener("beforeinput", e => {
 });
 cin.addEventListener("compositionend", () => { if (!TOUCH && onlySpace()) spaceToggle(); });
 cin.addEventListener("input", e => {
+  autoFilled = false;
   if (!TOUCH && onlySpace()) { if (!e.isComposing) spaceToggle(); return; }
   if (playing && cin.value.trim()) stop();
 });
@@ -548,7 +557,7 @@ if (CAN_REC) {
   mic.addEventListener("pointerleave", () => pttEnd("hold"));
   mic.addEventListener("contextmenu", e => e.preventDefault());
 } else if (TOUCH) {
-  cin.placeholder = "ここを押して、キーボードのマイクで話してください";
+  cin.placeholder = "ここに入力";
 }
 // Ctrl を 0.3秒押し続けたら音声入力。Ctrl と一緒に別のキーを押したとき（ショートカット）は音声入力にしない
 document.addEventListener("keydown", e => {
